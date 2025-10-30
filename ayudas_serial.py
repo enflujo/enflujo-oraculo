@@ -55,12 +55,15 @@ def _despertar_best_effort(puerto: str, baud: int, modo_prueba: bool) -> None:
 
 def mostrar_imagen(puerto: str, baud: int, datos: bytes, modo_prueba: bool) -> None:
     """
-    Envío síncrono (bloqueante).
+    Envío síncrono (bloqueante). Sin 'despertar' previo para evitar estados raros.
     """
+    import logging
+    from enviar_serial import enviar_cuadro_bn  # import aquí por claridad
+
     if modo_prueba:
         logging.info("[EPD] Modo prueba: no envío serial")
         return
-    _despertar_best_effort(puerto, baud, modo_prueba)
+
     with _open_serial_ctx_with_retry(puerto, baud) as ser:
         conf = enviar_cuadro_bn(ser, datos)
         logging.info(f"[EPD] Imagen mostrada ({conf})")
@@ -70,6 +73,8 @@ def mostrar_imagen_async(puerto: str, baud: int, datos: bytes, modo_prueba: bool
     """
     Lanza el envío en un hilo aparte y lo retorna. No bloquea.
     """
+    import logging
+
     def _send():
         try:
             mostrar_imagen(puerto, baud, datos, modo_prueba)

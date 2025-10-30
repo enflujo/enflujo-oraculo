@@ -1,5 +1,6 @@
 from __future__ import annotations
-import time, logging
+import time
+import logging
 from contextlib import AbstractContextManager
 
 try:
@@ -8,6 +9,7 @@ except Exception:
     lgpio = None
 
 from cancion import F_MIN, F_MAX, PULSE_MIN_US, EM, duracion_ms, midi_a_hz, nota_a_midi
+from utilidades import aborted
 
 MOTORES = [
     {"dir": 17, "step": 4},   # Motor 1
@@ -16,7 +18,6 @@ MOTORES = [
     {"dir": 8,  "step": 25},  # Motor 4
     {"dir": 7,  "step": 21},  # Motor 5
 ]
-
 
 def _auto_gpiochip_index() -> int:
     if lgpio is None:
@@ -35,14 +36,12 @@ def _auto_gpiochip_index() -> int:
             continue
     return 0
 
-
 class Motores(AbstractContextManager):
     def __init__(self, gpiochip_index: int | str = "auto", pin_enable: int | None = None):
         self.gpiochip_index = _auto_gpiochip_index() if gpiochip_index == "auto" else int(gpiochip_index)
         self.pin_enable = pin_enable
         self.handle = None
 
-    # Context manager
     def __enter__(self):
         if lgpio is None:
             logging.warning("[Motores] lgpio no disponible; modo simulación")
@@ -75,7 +74,7 @@ class Motores(AbstractContextManager):
                 self.handle = None
         logging.info("[Motores] Cerrados y deshabilitados")
 
-    # Bajo nivel
+    # --- Bajo nivel ---
     def _tone_off(self):
         if lgpio is None or self.handle is None:
             return
@@ -96,28 +95,53 @@ class Motores(AbstractContextManager):
             lgpio.tx_pulse(self.handle, m["step"], half_us, half_us, 0, 0)
 
     def _tocar(self, hz: float, ms: int, dirAlta: bool):
+        """Toca una 'nota' por ms milisegundos, pero sale inmediatamente si hay abort()."""
         if ms <= 0:
-            self._tone_off(); return
+            self._tone_off()
+            return
+
+        # Simulación / sin hardware: solo espera pero respetando abort()
         if lgpio is None or self.handle is None:
-            time.sleep(ms/1000.0); return
+            deadline = time.time() + (ms / 1000.0)
+            while time.time() < deadline:
+                if aborted():
+                    break
+                time.sleep(0.01)
+            return
+
+        # Set dirección y ENABLE
         for m in MOTORES:
             lgpio.gpio_write(self.handle, m["dir"], 1 if dirAlta else 0)
         if self.pin_enable is not None:
             lgpio.gpio_write(self.handle, self.pin_enable, 0)  # habilitar
         time.sleep(0.001)
+
+        # Arranca tono si corresponde
         if hz > 0:
             self._tone_on(hz)
-        time.sleep(ms/1000.0)
+
+        # Espera con chequeo frecuente de abort()
+        deadline = time.time() + (ms / 1000.0)
+        while time.time() < deadline:
+            if aborted():
+                break
+            time.sleep(0.01)
+
+        # Apaga y deshabilita
         self._tone_off()
         if self.pin_enable is not None:
             lgpio.gpio_write(self.handle, self.pin_enable, 1)
 
-    # API musical
+    # --- API musical ---
     def nota(self, n: int, octava: int, figura: int, alt: int = 0) -> None:
+        if aborted():
+            return
         midi = nota_a_midi(n, octava, alt) + EM.transposicion
         hz = midi_a_hz(midi)
         self._tocar(hz, duracion_ms(figura), EM.direccionAlta)
         EM.direccionAlta = not EM.direccionAlta
 
     def silencio(self, figura: int) -> None:
+        if aborted():
+            return
         self._tocar(0.0, duracion_ms(figura), EM.direccionAlta)
