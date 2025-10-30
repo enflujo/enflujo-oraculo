@@ -1,0 +1,23 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# exportados
+out/
+*.bin
+*.hex
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editores
+*.swp
+*.swo
+*~
